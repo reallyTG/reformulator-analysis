@@ -53,17 +53,30 @@ class CallToLoopingFunction extends CallExpr {
 predicate isNPlusOne(DataFlow::Node source, DataFlow::Node sink) {
     // Is there a loop between the source and sink?
     exists(LoopStmt ls | sink.getAstNode().getParent*() = ls.getBody() and
-                         ls.getTest().getEnclosingFunction() = source.asExpr().getEnclosingFunction()) or
+                         ls.getTest().getEnclosingFunction() = source.asExpr().getEnclosingFunction() and
+                         not source.getAstNode().getParent*() = ls.getBody()) or
     // Or is there a loop function between the source and sink?
     exists(CallToLoopingFunction ce | sink.getAstNode().getParent*() = ce.getArgument(0) and
-                                      ce.getEnclosingFunction() = source.asExpr().getEnclosingFunction())
+                                      ce.getEnclosingFunction() = source.asExpr().getEnclosingFunction() and
+                                      not source.getAstNode().getParent*() = ce.getArgument(0))
+}
+
+predicate noIfBetween(DataFlow::Node source, DataFlow::Node sink) {
+    not exists(IfStmt ifStmt | sink.getAstNode().getParent*() = ifStmt and not source.getAstNode().getParent*() = ifStmt)
+}
+
+predicate noContinueBetween(DataFlow::Node source, DataFlow::Node sink) {
+    not exists(ContinueStmt cStmt | source.getAstNode().getLocation().getStartLine() < cStmt.getLocation().getStartLine() and
+                                    cStmt.getLocation().getStartLine() < sink.getAstNode().getLocation().getStartLine())
 }
 
 from SequelizeTaintConfiguration cfg, DataFlow::Node source, DataFlow::Node sink
 where source != sink and 
     cfg.hasFlow(source, sink) and 
     not exists(DataFlow::Node subSink | sink.asExpr().getParentExpr() = subSink.asExpr() and cfg.hasFlow(source, subSink)) and
-    isNPlusOne(source, sink)
+    isNPlusOne(source, sink) and
+    noIfBetween(source, sink) and
+    noContinueBetween(source, sink)
 select ((DataFlow::InvokeNode) source).getCalleeName() as Source,
     source.getFile() as Source_File, 
     source.getStartLine() as Source_Start_Ln, 
@@ -72,4 +85,8 @@ select ((DataFlow::InvokeNode) source).getCalleeName() as Source,
     ((SequelizeAPIArgument) sink).getAPICall().asExpr().getEnclosingStmt().getFile() as Sink_File, 
     ((SequelizeAPIArgument) sink).getAPICall().asExpr().getEnclosingStmt().getLocation().getStartLine() as Sink_Start_Ln, 
     ((SequelizeAPIArgument) sink).getAPICall().asExpr().getEnclosingStmt().getLocation().getEndLine() as Sink_End_Ln,
-    sink as ExactSink
+    sink as ExactSink,
+    sink.getAstNode().getLocation().getStartLine() as ExactSinkStartLine,
+    sink.getAstNode().getLocation().getEndLine() as ExactSinkEndLine,
+    sink.getAstNode().getLocation().getStartColumn() as ExactSinkStartCol,
+    sink.getAstNode().getLocation().getEndColumn() as ExactSinkEndCol
